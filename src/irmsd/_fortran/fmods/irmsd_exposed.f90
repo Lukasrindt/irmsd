@@ -6,6 +6,7 @@ module irmsd_exposed
   use axis_module
   use irmsd_module
   use canonical_mod
+  use irmsd_refine
   implicit none
 contains
 
@@ -52,6 +53,7 @@ contains
     integer :: i
     type(rmsd_cache) :: rcache
     logical :: mirror
+    integer :: io,niter
 
     logical,parameter :: debug = .false.
 
@@ -89,7 +91,13 @@ contains
 
     if (debug) write (stdout,*) 'allow inversion?:            ',mirror
 
-    call min_rmsd(ref,mol,rcache=rcache,rmsdout=rmsdval,align=.true.)
+    call min_rmsd(ref,mol,rcache=rcache,rmsdout=rmsdval,align=.true.,io=io)
+
+    !> make terminal atoms follow their matched parent and re-optimize frame
+    if (io == 0) then
+      call refine_terminal_assignment(ref,mol,rcache%rank(:,1),niter,io)
+      if (io == 0) rmsdval = rmsd(ref,mol)
+    end if
 
     if (debug) then
       do i = 1,mol%nat
@@ -130,21 +138,15 @@ contains
     !*            the two structures; 0 means the mapping is bond-preserving
     !* atmis    : (out) per-atom number of such pairs
     !*******************************************************************
-    use adjacency,only:wbo2adjacency
     implicit none
-    type(coord),intent(inout) :: ref,mol
+    type(coord),intent(in) :: ref,mol
     integer,intent(out) :: nmis
     integer,intent(out) :: atmis(:)
-    real(wp),allocatable :: cn(:),bmat(:,:)
     integer,allocatable :: aref(:,:),amol(:,:)
     integer :: i,j
 
-    call ref%cn_to_bond(cn,bmat,'cov')
-    call wbo2adjacency(ref%nat,bmat,aref,0.02_wp)
-    deallocate (cn,bmat)
-    call mol%cn_to_bond(cn,bmat,'cov')
-    call wbo2adjacency(mol%nat,bmat,amol,0.02_wp)
-    deallocate (cn,bmat)
+    call ref%cn_to_adjacency(aref)
+    call mol%cn_to_adjacency(amol)
 
     nmis = 0
     atmis(:) = 0
