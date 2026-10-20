@@ -369,8 +369,9 @@ contains  !> MODULE PROCEDURES START HERE
 !> number of heavy atoms among many light ones can dominate it and pull
 !> the resulting principal axes away from the shape's actual ones.
 !>
-!> See Fe4Cage/README.md for a symmetric example with heavy metal atoms.
-!> In this case, min_rmsd missed several genuine point-group operations.
+!> See tests/api/test_fe4cage_alignment.py for a T-symmetric Fe4L6 cage
+!> with heavy metal atoms. In this case, min_rmsd missed one genuine C3
+!> point-group operation (2.007 A instead of 0.0 A).
 !>
 !> Note that equal weighting does not remove genuine degeneracy.
 !>

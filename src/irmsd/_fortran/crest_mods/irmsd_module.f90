@@ -665,8 +665,8 @@ contains  !> MODULE PROCEDURES START HERE
 !> ----------------------------------------------------
 !> ROTATIONAL AXIS ALIGNMENT AND LSAP CHECKS - START
 !> ----------------------------------------------------
-!> Built and tested (see axis_module.f90's note above axis_0_equal_mass
-!> for the verification numbers). trial=1 below is the ORIGINAL,
+!> Equal-mass axis fallback (see axis_0_equal_mass in axis_module.f90
+!> and tests/api/test_fe4cage_alignment.py). trial=1 below is the ORIGINAL,
 !> unmodified mass-weighted-axis search; trial=2 repeats the exact same
 !> search using axis_4_equal_mass instead, to fix a confirmed failure
 !> mode where a few heavy atoms bias axis_0's mass-weighted principal
