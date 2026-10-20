@@ -180,7 +180,8 @@ contains  !> MODULE PROCEDURES START HERE
     integer :: prlvl
     type(rmsd_cache),allocatable :: rcaches(:)
     type(coord),allocatable,target :: workmols(:)
-    type(canonical_sorter) :: scratch
+    type(canonical_sorter) :: scratch,lastcan
+    integer :: lastid
     integer,allocatable :: ranks_all(:,:)
     logical,allocatable :: has_id(:)
     type(coord),pointer :: ref,mol
@@ -256,6 +257,7 @@ contains  !> MODULE PROCEDURES START HERE
     nat = ref%nat
     allocate (ranks_all(nat,nall),source=0)
     allocate (has_id(nall),source=.false.)
+    lastid = 0
     if (prlvl > 0) then
       write (stdout,'(a,9x,a)',advance='no') 'Setting up atom IDs','... '
       flush (stdout)
@@ -279,18 +281,23 @@ contains  !> MODULE PROCEDURES START HERE
             stereocheck = .not. (scratch%hasstereo(ref))
             call scratch%deallocate()
           end if
+        else if (lastid > 0.and.lastcan%same_graph(structures(lastid),mol)) then
+          !> same atom types and bonds as the last computed structure
+          ranks_all(1:nat,ii) = ranks_all(1:nat,lastid)
         else
           !> recompute the canonical ranks for this structure
-          call scratch%init(mol,invtype='apsp+',heavy=.false.)
-          ranks_all(1:nat,ii) = scratch%rank(1:nat)
-          if (ii == 1) stereocheck = .not. (scratch%hasstereo(ref))
-          call scratch%deallocate()
+          call lastcan%deallocate()
+          call lastcan%init(mol,invtype='apsp+',heavy=.false.)
+          ranks_all(1:nat,ii) = lastcan%rank(1:nat)
+          if (ii == 1) stereocheck = .not. (lastcan%hasstereo(ref))
+          lastid = ii
         end if
       end if
       if (prlvl > 1) then
         call progress_update(ps,ii,nall)
       end if
     end do
+    call lastcan%deallocate()
     !> in the shared-id mode, broadcast structure 1's ranks to all others
     if (.not.individual_IDs) then
       do ii = 2,nall
@@ -464,7 +471,8 @@ contains  !> MODULE PROCEDURES START HERE
     integer :: prlvl
     type(rmsd_cache),allocatable :: rcaches(:)
     type(coord),allocatable,target :: workmols(:)
-    type(canonical_sorter) :: scratch
+    type(canonical_sorter) :: scratch,lastcan
+    integer :: lastid
     integer,allocatable :: ranks_all(:,:)
     logical,allocatable :: has_id(:)
     type(coord),pointer :: ref,mol
@@ -514,6 +522,7 @@ contains  !> MODULE PROCEDURES START HERE
     nat = ref%nat
     allocate (ranks_all(nat,nall),source=0)
     allocate (has_id(nall),source=.false.)
+    lastid = 0
     do ii = 1,nall
       mol => structures(ii)
       call axis(mol%nat,mol%at,mol%xyz)
@@ -526,14 +535,18 @@ contains  !> MODULE PROCEDURES START HERE
             stereocheck = .not. (scratch%hasstereo(ref))
             call scratch%deallocate()
           end if
+        else if (lastid > 0.and.lastcan%same_graph(structures(lastid),mol)) then
+          ranks_all(1:nat,ii) = ranks_all(1:nat,lastid)
         else
-          call scratch%init(mol,invtype='apsp+',heavy=.false.)
-          ranks_all(1:nat,ii) = scratch%rank(1:nat)
-          if (ii == 1) stereocheck = .not. (scratch%hasstereo(ref))
-          call scratch%deallocate()
+          call lastcan%deallocate()
+          call lastcan%init(mol,invtype='apsp+',heavy=.false.)
+          ranks_all(1:nat,ii) = lastcan%rank(1:nat)
+          if (ii == 1) stereocheck = .not. (lastcan%hasstereo(ref))
+          lastid = ii
         end if
       end if
     end do
+    call lastcan%deallocate()
     if (.not.individual_IDs) then
       do ii = 2,nall
         ranks_all(1:nat,ii) = ranks_all(1:nat,1)
