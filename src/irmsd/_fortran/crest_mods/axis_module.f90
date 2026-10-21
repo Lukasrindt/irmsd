@@ -4,7 +4,7 @@
 ! Copyright (C) 2017 Stefan Grimme
 ! Copyright (C) 2021 Philipp Pracht
 ! Copyright (C) 2026 Paula Teeuwen & Philipp Pracht
-
+!
 ! crest is free software: you can redistribute it and/or modify it under
 ! the terms of the GNU Lesser General Public License as published by
 ! the Free Software Foundation, either version 3 of the License, or
@@ -38,9 +38,8 @@ module axis_module
   real(wp), parameter :: twothirdpi = 8.0_wp * atan(1.0_wp) / 3.0_wp
 
 
-  !> ================================================================================
-  !> Addition by Paula for the equal-mass axis fallback for mass-biased pre-alignment
-  !> ================================================================================
+  !> Equal-weight variants of axis_0/axis_4 (P. Teeuwen): every atom has weight 1
+  !> in the inertia tensor. min_rmsd uses them as a second pre-alignment frame.
   public :: axis_0_equal_mass
   public :: axis_4_equal_mass
 
@@ -361,31 +360,37 @@ contains  !> MODULE PROCEDURES START HERE
   end subroutine axis_4
 
 !========================================================================================!
-!> subroutine axis_0_equal_mass
-!> Identical to axis_0, except every atom is weighted equally in the inertia tensor instead of by its isotopic mass.
-!> (atmass = 1.0_wp instead of atmass = ams(at(i)))
-!>
-!> Motivation: axis_0's inertia tensor is mass-weighted, so a small
-!> number of heavy atoms among many light ones can dominate it and pull
-!> the resulting principal axes away from the shape's actual ones.
-!>
-!> See tests/api/test_fe4cage_alignment.py for a T-symmetric Fe4L6 cage
-!> with heavy metal atoms. In this case, min_rmsd missed one genuine C3
-!> point-group operation (2.007 A instead of 0.0 A).
-!>
-!> Note that equal weighting does not remove genuine degeneracy.
-!>
-!> Input:    nat - number of atoms
-!>            at - atom types
-!>         coord - atomic coordinates in ANGSTROEM
-!>
-!> Output:   rot - rotational constants in MHz
-!>         avmom - average momentum in a.u. (10⁻⁴⁷kg m²)
-!>          evec - rot. matrix
-!>
-!========================================================================================!
 
   subroutine axis_0_equal_mass(nat,at,coord,rot,avmom,evec)
+    !*****************************************************************
+    !* Same as axis_0, except that every atom has weight 1 in the
+    !* inertia tensor instead of its isotopic mass. The tensor is still
+    !* taken about the centre of mass, as in axis_0.
+    !*
+    !* min_rmsd uses these axes as a second pre-alignment frame. When
+    !* two or three principal moments are equal or nearly equal
+    !* (spherical or near-spherical tops: cages, clusters,
+    !* adamantane-like molecules), the axes inside the degenerate
+    !* subspace are arbitrary, and small coordinate changes can turn
+    !* them freely. The equal-weight tensor gives a different choice of
+    !* axes, so the orientation search gets a second chance to line the
+    !* two structures up.
+    !*
+    !* Equal weights do not lift a degeneracy that the symmetry
+    !* enforces: the T-symmetric Fe4L6 cage in
+    !* tests/api/test_fe4cage_alignment.py has three equal moments with
+    !* either weighting. They only change which of the equivalent axes
+    !* are picked.
+    !*
+    !* Input:  nat   - number of atoms
+    !*         at    - atom types
+    !*         coord - atomic coordinates in Angstrom
+    !* Output: rot   - rotational constants in MHz from unit weights;
+    !*                 not physical, but their ratios classify the
+    !*                 degeneracy in min_rmsd_rotcheck_unique
+    !*         avmom - average moment, unit weights
+    !*         evec  - principal axes (rotation matrix)
+    !*****************************************************************
     implicit none
     integer,intent(in)   :: nat
     integer,intent(in)   :: at(nat)
@@ -445,11 +450,13 @@ contains  !> MODULE PROCEDURES START HERE
 
 
 !========================================================================================!
-!> subroutine axis_4_equal_mass
-!> Identical to axis_4, except it calls axis_0_equal_mass instead of axis_0.
-!========================================================================================!
 
   subroutine axis_4_equal_mass(nat,at,coord,rotconst)
+    !*****************************************************************
+    !* Same as axis_4 (shift to the centre of mass, then rotate onto
+    !* the principal axes, keeping chirality), but with the
+    !* equal-weight axes of axis_0_equal_mass.
+    !*****************************************************************
     implicit none
     integer,intent(in) :: nat
     integer,intent(in) :: at(nat)

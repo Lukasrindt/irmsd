@@ -665,15 +665,14 @@ contains  !> MODULE PROCEDURES START HERE
 !> ----------------------------------------------------
 !> ROTATIONAL AXIS ALIGNMENT AND LSAP CHECKS - START
 !> ----------------------------------------------------
-!> Equal-mass axis fallback (see axis_0_equal_mass in axis_module.f90
-!> and tests/api/test_fe4cage_alignment.py). trial=1 below is the ORIGINAL,
-!> unmodified mass-weighted-axis search; trial=2 repeats the exact same
-!> search using axis_4_equal_mass instead, to fix a confirmed failure
-!> mode where a few heavy atoms bias axis_0's mass-weighted principal
-!> axes away from a real point-group operation (see that routine's
-!> docstring). Whichever trial reaches the lower LSAP cost wins -- the
-!> 32-way grid search itself (min_rmsd_rotcheck_permute) is untouched;
-!> this only gives it a second candidate pre-alignment to search from.
+!>-- Two pre-alignment frames. trial = 1 is the original search on the
+!>   mass-weighted principal axes; trial = 2 repeats the same search on
+!>   the equal-weight axes of axis_4_equal_mass. With (near-)degenerate
+!>   moments the axes are an arbitrary choice inside the degenerate
+!>   subspace, so a second, independent choice often lines the structures
+!>   up where the first does not (see axis_0_equal_mass). The trial with
+!>   the lower LSAP cost wins, so the result can only improve; the
+!>   orientation search itself (min_rmsd_rotcheck_permute) is unchanged.
       block
         real(wp),allocatable :: xyz_pristine(:,:),xyz_best(:,:)
         integer,allocatable :: order_bkup_best(:,:)
@@ -734,9 +733,7 @@ contains  !> MODULE PROCEDURES START HERE
           end if
         end do
 
-        !> restore the winning trial's state -- everything below this block
-        !> (unchanged from the original code) then proceeds exactly as it
-        !> always did, on whichever trial actually won.
+        !> restore the winning trial's state; the code below runs unchanged on it
         mol%xyz = xyz_best
         cptr%order_bkup(:,1:32) = order_bkup_best
         tmprmsd_sym = tmprmsd_sym_best

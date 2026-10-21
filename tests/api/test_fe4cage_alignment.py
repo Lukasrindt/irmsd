@@ -1,13 +1,13 @@
-"""Regression test for the equal-mass axis fallback in ``min_rmsd``.
+"""Regression test for the equal-weight axis frame in ``min_rmsd``.
 
-``tests/data/Fe4Cage.xyz`` is a T-symmetric Fe4L6 cage (316 atoms): 4 heavy Fe
-centers among light organic linkers (C/H/N/O). No atom has a unique canonical
-rank, so ``min_rmsd`` falls back to principal-axis pre-alignment plus the
-32-way grid search. With mass-weighted axes, the 4 Fe atoms dominate the
-inertia tensor and skew the axes, so before the fallback one of the 11
-non-identity T operations (a C3) scored 2.007 A instead of 0.0 A. This is
-unrelated to the degenerate-axis limitation of high-symmetry molecules
-(C60, adamantane): the cage's axes are well defined, only biased by mass.
+``tests/data/Fe4Cage.xyz`` is a T-symmetric Fe4L6 cage (316 atoms). No atom
+has a unique canonical rank, so ``min_rmsd`` aligns the structures on their
+principal axes and searches the axis flips. T symmetry makes all three
+principal moments equal (with mass weights and with equal weights alike), so
+the principal axes are an arbitrary choice and need not correspond between the
+two structures. With mass-weighted axes alone, one of the 11 non-identity T
+operations (a C3) scored 2.007 A instead of 0.0 A. The equal-weight frame gives
+the search a second, independent set of axes and recovers it.
 
 The point-group operations are generated at test time with
 ``get_symmetry_operations``, an alignment-independent geometric symmetry
@@ -58,5 +58,5 @@ def test_fe4cage_pointgroup_isomers_score_zero(fe4cage, fe4cage_operations):
     failed = {k: v for k, v in rmsds.items() if v >= 1e-4}
     assert not failed, (
         f"{len(failed)}/{len(ops)} exact point-group operations did not score "
-        f"~0 A: {failed} -- the equal-mass axis fallback may be missing or broken"
+        f"~0 A: {failed} -- the equal-weight axis frame may be missing or broken"
     )
