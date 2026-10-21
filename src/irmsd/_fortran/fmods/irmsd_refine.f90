@@ -10,10 +10,11 @@ module irmsd_refine
   use crest_parameters
   use strucrd
   use irmsd_module,only:rmsd
+  use irmsd_walk,only:walk_assignment
   implicit none
   private
 
-  public :: refine_terminal_assignment
+  public :: refine_assignment,refine_terminal_assignment
 
   integer,parameter :: maxiter = 50
   !> number of starting assignments for the alternating loop
@@ -23,7 +24,84 @@ module irmsd_refine
 
 contains
 
-  subroutine refine_terminal_assignment(ref,mol,rank,niter,io)
+  subroutine refine_assignment(ref,mol,rank,stereocheck,rmsdval,io)
+    !*******************************************************************
+    !* Final assignment after min_rmsd. Candidates are min_rmsd's own
+    !* assignment and the centre walk (irmsd_walk), the latter also on
+    !* the mirror image if inversion is allowed; each gets the terminal
+    !* atom refinement. The lowest RMSD among the bond-preserving
+    !* candidates wins; if none preserves bonds, min_rmsd's stays.
+    !*
+    !* ref         : reference structure
+    !* mol         : min_rmsd output (matched order, aligned onto ref);
+    !*               replaced by the chosen assignment, aligned onto ref
+    !* rank        : canonical rank of each matched atom pair
+    !* stereocheck : also try the mirror image of mol
+    !* rmsdval     : (out) RMSD of the chosen assignment (bohr)
+    !* io          : (out) 0 on success, else mol is unchanged
+    !*******************************************************************
+    implicit none
+    type(coord),intent(in) :: ref
+    type(coord),intent(inout) :: mol
+    integer,intent(in) :: rank(:)
+    logical,intent(in) :: stereocheck
+    real(wp),intent(out) :: rmsdval
+    integer,intent(out) :: io
+
+    type(coord) :: cand,work,best
+    integer,allocatable :: aref(:,:),amol(:,:),aperm(:,:),perm(:),tperm(:)
+    real(wp) :: r,rbest,rw,U(3,3)
+    integer :: imir,niter,iol
+    logical :: valid,bestvalid
+
+    io = 1
+    rmsdval = huge(rmsdval)
+    call ref%cn_to_adjacency(aref)
+    call mol%cn_to_adjacency(amol)
+    if (.not.allocated(aref).or..not.allocated(amol)) return
+    allocate (perm(ref%nat))
+
+!>-- candidate 1: the min_rmsd assignment
+    cand = mol
+    call refine_terminal_assignment(ref,cand,rank,niter,iol,aref,amol,tperm)
+    best = cand
+    rbest = rmsd(ref,cand)
+    bestvalid = all(aref == amol(tperm,tperm))
+
+!>-- candidates 2 and 3: centre walk on mol and on its mirror image
+    do imir = 1,merge(2,1,stereocheck)
+      work = mol
+      if (imir == 2) work%xyz(3,:) = -work%xyz(3,:)
+      call walk_assignment(ref,work,rank,aref,amol,perm,rw,iol)
+      if (iol /= 0) cycle
+      cand = work
+      cand%xyz(:,:) = work%xyz(:,perm)
+      cand%at(:) = work%at(perm)
+      aperm = amol(perm,perm)
+      call refine_terminal_assignment(ref,cand,rank,niter,iol,aref,aperm,tperm)
+      valid = all(aref == aperm(tperm,tperm))
+      if (iol /= 0) then
+        r = rmsd(ref,cand,rotmat=U)
+        cand%xyz = matmul(U,cand%xyz)
+      else
+        r = rmsd(ref,cand)
+      end if
+      if ((valid.and..not.bestvalid).or.(valid.eqv.bestvalid.and.r < rbest)) then
+        best = cand
+        rbest = r
+        bestvalid = valid
+      end if
+    end do
+
+    mol%xyz(:,:) = best%xyz(:,:)
+    mol%at(:) = best%at(:)
+    rmsdval = rbest
+    io = 0
+  end subroutine refine_assignment
+
+!========================================================================================!
+
+  subroutine refine_terminal_assignment(ref,mol,rank,niter,io,aref,amol,permout)
     !*******************************************************************
     !* Re-assign the terminal atoms of mol among the same-rank terminal
     !* neighbours of their matched parent ("sibling groups"), alternating
@@ -42,6 +120,10 @@ contains
     !* io    : (out) 0 on success; 1 if the terminal atoms around some
     !*         parent differ between the two structures, in which case
     !*         mol is returned unchanged
+    !* aref, amol : (optional) adjacency matrices of ref and mol, else
+    !*         computed here
+    !* permout : (optional, out) the reordering applied to mol, i.e. new
+    !*         mol atom i is old mol atom permout(i)
     !*******************************************************************
     implicit none
     type(coord),intent(in) :: ref
@@ -49,10 +131,12 @@ contains
     integer,intent(in) :: rank(:)
     integer,intent(out) :: niter
     integer,intent(out) :: io
+    integer,intent(in),optional :: aref(:,:),amol(:,:)
+    integer,allocatable,intent(out),optional :: permout(:)
 
     type(coord) :: work
     integer,allocatable :: gstart(:),gref(:),gmol(:)
-    integer,allocatable :: perm(:),bestperm(:),used(:)
+    integer,allocatable :: perm(:),bestperm(:),used(:),ar(:,:),am(:,:)
     real(wp) :: val,bestval,U(3,3)
     integer :: nat,ngroup,istart,g,n,j,iter
     integer(int64) :: seed
@@ -60,8 +144,15 @@ contains
     io = 0
     niter = 0
     nat = ref%nat
+    if (present(permout)) permout = [(j,j=1,nat)]
 
-    call sibling_groups(ref,mol,rank,ngroup,gstart,gref,gmol,io)
+    if (present(aref).and.present(amol)) then
+      call sibling_groups(ref%nat,aref,amol,rank,ngroup,gstart,gref,gmol,io)
+    else
+      call ref%cn_to_adjacency(ar)
+      call mol%cn_to_adjacency(am)
+      call sibling_groups(ref%nat,ar,am,rank,ngroup,gstart,gref,gmol,io)
+    end if
     if (io /= 0) return
     if (ngroup == 0) return
 
@@ -103,6 +194,7 @@ contains
     end do STARTS
 
 !>-- apply the best assignment and alignment
+    if (present(permout)) permout(:) = bestperm(:)
     mol%xyz(:,:) = mol%xyz(:,bestperm)
     mol%at(:) = mol%at(bestperm)
     val = rmsd(ref,mol,rotmat=U)
@@ -111,7 +203,7 @@ contains
 
 !========================================================================================!
 
-  subroutine sibling_groups(ref,mol,rank,ngroup,gstart,gref,gmol,io)
+  subroutine sibling_groups(nat,aref,amol,rank,ngroup,gstart,gref,gmol,io)
     !*****************************************************************
     !* Collect the sibling groups: for every non-terminal atom p, the
     !* terminal neighbours of a given rank in ref (gref) and the
@@ -120,18 +212,16 @@ contains
     !* io = 1 if a group has a different size in the two structures.
     !*****************************************************************
     implicit none
-    type(coord),intent(in) :: ref,mol
+    integer,intent(in) :: nat
+    integer,intent(in) :: aref(:,:),amol(:,:)
     integer,intent(in) :: rank(:)
     integer,intent(out) :: ngroup
     integer,allocatable,intent(out) :: gstart(:),gref(:),gmol(:)
     integer,intent(out) :: io
-    integer,allocatable :: aref(:,:),amol(:,:),degref(:),degmol(:)
-    integer :: nat,p,t,j,n,k
+    integer,allocatable :: degref(:),degmol(:)
+    integer :: p,t,j,n,k
 
     io = 0
-    nat = ref%nat
-    call ref%cn_to_adjacency(aref)
-    call mol%cn_to_adjacency(amol)
     degref = sum(aref,dim=1)
     degmol = sum(amol,dim=1)
 

@@ -6,7 +6,7 @@ module sorter_exposed
   use axis_module
   use irmsd_module
   use canonical_mod
-  use irmsd_refine,only:refine_terminal_assignment
+  use irmsd_refine,only:refine_assignment
   use utilities,only:qsorti
   use term_ui
   implicit none
@@ -175,7 +175,8 @@ contains  !> MODULE PROCEDURES START HERE
     real(wp),intent(in),optional :: ETHR
 
     !> LOCAL
-    integer :: i,ii,jj,T,cc,nat,io,niter,ioref
+    integer :: i,ii,jj,T,cc,nat,io,ioref
+    real(wp) :: rmsdref
     integer :: gcount,ggcount
     integer :: prlvl
     type(rmsd_cache),allocatable :: rcaches(:)
@@ -427,9 +428,9 @@ contains  !> MODULE PROCEDURES START HERE
           topo_group(jj) = topo_group(jj)+1
           cycle
         end if
-        call refine_terminal_assignment(structures(ii),workmols(cc), &
-        &        rcaches(cc)%rank(1:nat,1),niter,ioref)
-        if (ioref == 0) rmsdval = rmsd(structures(ii),workmols(cc))
+        call refine_assignment(structures(ii),workmols(cc), &
+        &        rcaches(cc)%rank(1:nat,1),rcaches(cc)%stereocheck,rmsdref,ioref)
+        if (ioref == 0) rmsdval = rmsdref
         if (rmsdval < RTHR) groups(jj) = gcount
 
       end do
@@ -467,7 +468,8 @@ contains  !> MODULE PROCEDURES START HERE
     integer,intent(in),optional :: printlvl
 
     !> LOCAL
-    integer :: i,ii,jj,T,cc,nat,io,niter,ioref
+    integer :: i,ii,jj,T,cc,nat,io,ioref
+    real(wp) :: rmsdref
     integer :: prlvl
     type(rmsd_cache),allocatable :: rcaches(:)
     type(coord),allocatable,target :: workmols(:)
@@ -612,9 +614,9 @@ contains  !> MODULE PROCEDURES START HERE
       call min_rmsd(structures(jj),workmols(cc), &
       &        rcache=rcaches(cc),rmsdout=rmsdval,topocheck=.true.,io=io)
       if (io == 0) then
-        call refine_terminal_assignment(structures(jj),workmols(cc), &
-        &        rcaches(cc)%rank(1:nat,1),niter,ioref)
-        if (ioref == 0) rmsdval = rmsd(structures(jj),workmols(cc))
+        call refine_assignment(structures(jj),workmols(cc), &
+        &        rcaches(cc)%rank(1:nat,1),rcaches(cc)%stereocheck,rmsdref,ioref)
+        if (ioref == 0) rmsdval = rmsdref
       end if
       delta(ii) = rmsdval
       ! !$omp end do

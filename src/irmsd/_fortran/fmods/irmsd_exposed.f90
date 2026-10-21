@@ -53,7 +53,8 @@ contains
     integer :: i
     type(rmsd_cache) :: rcache
     logical :: mirror
-    integer :: io,niter
+    integer :: io
+    real(wp) :: rmsdref
 
     logical,parameter :: debug = .false.
 
@@ -93,10 +94,10 @@ contains
 
     call min_rmsd(ref,mol,rcache=rcache,rmsdout=rmsdval,align=.true.,io=io)
 
-    !> make terminal atoms follow their matched parent and re-optimize frame
+    !> bond-preserving assignment: centre walk vs. min_rmsd, terminal atoms refined
     if (io == 0) then
-      call refine_terminal_assignment(ref,mol,rcache%rank(:,1),niter,io)
-      if (io == 0) rmsdval = rmsd(ref,mol)
+      call refine_assignment(ref,mol,rcache%rank(:,1),rcache%stereocheck,rmsdref,io)
+      if (io == 0) rmsdval = rmsdref
     end if
 
     if (debug) then
