@@ -665,33 +665,80 @@ contains  !> MODULE PROCEDURES START HERE
 !> ----------------------------------------------------
 !> ROTATIONAL AXIS ALIGNMENT AND LSAP CHECKS - START
 !> ----------------------------------------------------
+!>-- Two pre-alignment frames. trial = 1 is the original search on the
+!>   mass-weighted principal axes; trial = 2 repeats the same search on
+!>   the equal-weight axes of axis_4_equal_mass. With (near-)degenerate
+!>   moments the axes are an arbitrary choice inside the degenerate
+!>   subspace, so a second, independent choice often lines the structures
+!>   up where the first does not (see axis_0_equal_mass). The trial with
+!>   the lower LSAP cost wins, so the result can only improve; the
+!>   orientation search itself (min_rmsd_rotcheck_permute) is unchanged.
+      block
+        real(wp),allocatable :: xyz_pristine(:,:),xyz_best(:,:)
+        integer,allocatable :: order_bkup_best(:,:)
+        real(wp) :: tmprmsd_sym_best(32)
+        real(wp) :: best_cost,trial_cost
+        integer :: uniquenesscase_best,trial
 
-      !> initialize to huge
-      tmprmsd_sym(:) = inf
-      !> initial alignment of mol
-      call axis(mol%nat,mol%at,mol%xyz,rotconst)
-      call min_rmsd_rotcheck_unique(rotconst,uniquenesscase)
+        allocate (xyz_pristine(3,mol%nat),source=mol%xyz)
+        best_cost = inf
 
-      !> Running the checks and check of uniqueness of rotational axes
-      call min_rmsd_rotcheck_permute(ref,mol,cptr,tmprmsd_sym,1,uniquenesscase)
-      if (debug) then
-        write (*,*) 'Total LSAP cost:',minval(tmprmsd_sym(1:16))
-        call mol%append(dumpunit)
-      end if
+        do trial = 1,2
+          if (trial == 2) mol%xyz = xyz_pristine  !> restore pre-alignment coords
 
-      !> mirror z and re-run the same checks (i.e. the false rotamer inversion)
-      if (cptr%stereocheck) then
-        mol%xyz(3,:) = -mol%xyz(3,:)  !> mirror z
-        call axis(mol%nat,mol%at,mol%xyz) !> align
+          !> initialize to huge
+          tmprmsd_sym(:) = inf
+          !> initial alignment of mol
+          if (trial == 1) then
+            call axis(mol%nat,mol%at,mol%xyz,rotconst)
+          else
+            call axis_4_equal_mass(mol%nat,mol%at,mol%xyz,rotconst)
+          end if
+          call min_rmsd_rotcheck_unique(rotconst,uniquenesscase)
 
-        !> Running the checks
-        call min_rmsd_rotcheck_permute(ref,mol,cptr,tmprmsd_sym,2,uniquenesscase)
-        if (debug) then
-          write (*,*) 'Total LSAP cost (inverted):',minval(tmprmsd_sym(17:32))
-          call mol%append(dumpunit)
-        end if
-        mol%xyz(3,:) = -mol%xyz(3,:)  !> restore z
-      end if
+          !> Running the checks and check of uniqueness of rotational axes
+          call min_rmsd_rotcheck_permute(ref,mol,cptr,tmprmsd_sym,1,uniquenesscase)
+          if (debug) then
+            write (*,*) 'Total LSAP cost:',minval(tmprmsd_sym(1:16))
+            call mol%append(dumpunit)
+          end if
+
+          !> mirror z and re-run the same checks (i.e. the false rotamer inversion)
+          if (cptr%stereocheck) then
+            mol%xyz(3,:) = -mol%xyz(3,:)  !> mirror z
+            if (trial == 1) then
+              call axis(mol%nat,mol%at,mol%xyz) !> align
+            else
+              call axis_4_equal_mass(mol%nat,mol%at,mol%xyz) !> align
+            end if
+
+            !> Running the checks
+            call min_rmsd_rotcheck_permute(ref,mol,cptr,tmprmsd_sym,2,uniquenesscase)
+            if (debug) then
+              write (*,*) 'Total LSAP cost (inverted):',minval(tmprmsd_sym(17:32))
+              call mol%append(dumpunit)
+            end if
+            mol%xyz(3,:) = -mol%xyz(3,:)  !> restore z
+          end if
+
+          trial_cost = minval(tmprmsd_sym(1:32))
+          if (trial_cost < best_cost) then
+            best_cost = trial_cost
+            if (.not.allocated(xyz_best)) allocate (xyz_best(3,mol%nat))
+            if (.not.allocated(order_bkup_best)) allocate (order_bkup_best(mol%nat,32))
+            xyz_best = mol%xyz
+            order_bkup_best = cptr%order_bkup(:,1:32)
+            tmprmsd_sym_best = tmprmsd_sym
+            uniquenesscase_best = uniquenesscase
+          end if
+        end do
+
+        !> restore the winning trial's state; the code below runs unchanged on it
+        mol%xyz = xyz_best
+        cptr%order_bkup(:,1:32) = order_bkup_best
+        tmprmsd_sym = tmprmsd_sym_best
+        uniquenesscase = uniquenesscase_best
+      end block
 
 !>--- select the best match among the ones after symmetry operations and use its ordering
       ii = minloc(tmprmsd_sym(1:32),1)

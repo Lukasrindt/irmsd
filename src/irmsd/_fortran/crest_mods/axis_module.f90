@@ -3,6 +3,7 @@
 !
 ! Copyright (C) 2017 Stefan Grimme
 ! Copyright (C) 2021 Philipp Pracht
+! Copyright (C) 2026 Paula Teeuwen & Philipp Pracht
 !
 ! crest is free software: you can redistribute it and/or modify it under
 ! the terms of the GNU Lesser General Public License as published by
@@ -35,6 +36,12 @@ module axis_module
 
   !> 2π/3
   real(wp), parameter :: twothirdpi = 8.0_wp * atan(1.0_wp) / 3.0_wp
+
+
+  !> Equal-weight variants of axis_0/axis_4 (P. Teeuwen): every atom has weight 1
+  !> in the inertia tensor. min_rmsd uses them as a second pre-alignment frame.
+  public :: axis_0_equal_mass
+  public :: axis_4_equal_mass
 
   public :: axis
   interface axis
@@ -351,6 +358,143 @@ contains  !> MODULE PROCEDURES START HERE
 
     return
   end subroutine axis_4
+
+!========================================================================================!
+
+  subroutine axis_0_equal_mass(nat,at,coord,rot,avmom,evec)
+    !*****************************************************************
+    !* Same as axis_0, except that every atom has weight 1 in the
+    !* inertia tensor instead of its isotopic mass. The tensor is still
+    !* taken about the centre of mass, as in axis_0.
+    !*
+    !* min_rmsd uses these axes as a second pre-alignment frame. When
+    !* two or three principal moments are equal or nearly equal
+    !* (spherical or near-spherical tops: cages, clusters,
+    !* adamantane-like molecules), the axes inside the degenerate
+    !* subspace are arbitrary, and small coordinate changes can turn
+    !* them freely. The equal-weight tensor gives a different choice of
+    !* axes, so the orientation search gets a second chance to line the
+    !* two structures up.
+    !*
+    !* Equal weights do not lift a degeneracy that the symmetry
+    !* enforces: the T-symmetric Fe4L6 cage in
+    !* tests/api/test_fe4cage_alignment.py has three equal moments with
+    !* either weighting. They only change which of the equivalent axes
+    !* are picked.
+    !*
+    !* Input:  nat   - number of atoms
+    !*         at    - atom types
+    !*         coord - atomic coordinates in Angstrom
+    !* Output: rot   - rotational constants in MHz from unit weights;
+    !*                 not physical, but their ratios classify the
+    !*                 degeneracy in min_rmsd_rotcheck_unique
+    !*         avmom - average moment, unit weights
+    !*         evec  - principal axes (rotation matrix)
+    !*****************************************************************
+    implicit none
+    integer,intent(in)   :: nat
+    integer,intent(in)   :: at(nat)
+    real(wp),intent(in)  :: coord(3,nat)
+    real(wp),intent(out) :: rot(3),avmom,evec(3,3)
+    real(wp) :: a(3,3)
+    real(wp) :: t(6),xyzmom(3),eig(3)
+    real(wp) :: atmass,shift(3)
+    integer :: i,j
+    real(wp),parameter :: const1 = 1.66053_wp
+
+    call CMAshift(nat,at,coord,shift)
+
+    t = 0.0_wp
+    do i = 1,6
+      t(i) = dble(i) * 1.0d-10
+    end do
+    do i = 1,nat
+      atmass = 1.0_wp  !> <-- the only change vs. axis_0 (was: ams(at(i)))
+      t(1) = t(1) + atmass * ((coord(2,i)-shift(2))**2 + (coord(3,i)-shift(3))**2)
+      t(2) = t(2) - atmass * (coord(1,i)-shift(1)) * (coord(2,i)-shift(2))
+      t(3) = t(3) + atmass * ((coord(3,i)-shift(3))**2 + (coord(1,i)-shift(1))**2)
+      t(4) = t(4) - atmass * (coord(3,i)-shift(3)) * (coord(1,i)-shift(1))
+      t(5) = t(5) - atmass * (coord(2,i)-shift(2)) * (coord(3,i)-shift(3))
+      t(6) = t(6) + atmass * ((coord(1,i)-shift(1))**2 + (coord(2,i)-shift(2))**2)
+      a(1,1) = t(1)
+      a(2,1) = t(2)
+      a(1,2) = t(2)
+      a(2,2) = t(3)
+      a(3,1) = t(4)
+      a(1,3) = t(4)
+      a(3,2) = t(5)
+      a(2,3) = t(5)
+      a(3,3) = t(6)
+    end do
+
+    evec = 0.0_wp
+    eig = 0.0_wp
+    call eigvec3x3(a, eig, evec)
+
+    do i = 1,3
+      do j = 1,3
+        if (abs(evec(i,j)) .lt. 1d-9) evec(i,j) = 0.0_wp
+      end do
+      if (eig(i) .lt. 3.d-4) then
+        eig(i) = 0.d0
+        rot(i) = 0.d0
+      else
+        rot(i) = icm2MHz * Aamu2icm / eig(i)
+      end if
+      xyzmom(i) = eig(i) * const1
+    end do
+    avmom = 1.d-47 * (xyzmom(1) + xyzmom(2) + xyzmom(3)) / 3.0_wp
+
+    return
+  end subroutine axis_0_equal_mass
+
+
+!========================================================================================!
+
+  subroutine axis_4_equal_mass(nat,at,coord,rotconst)
+    !*****************************************************************
+    !* Same as axis_4 (shift to the centre of mass, then rotate onto
+    !* the principal axes, keeping chirality), but with the
+    !* equal-weight axes of axis_0_equal_mass.
+    !*****************************************************************
+    implicit none
+    integer,intent(in) :: nat
+    integer,intent(in) :: at(nat)
+    real(wp),intent(inout) :: coord(3,nat)
+    real(wp),intent(out),optional :: rotconst(3)
+    real(wp) :: coordtmp(3),shift(3)
+    real(wp) :: rot(3),avmom,evec(3,3)
+    integer :: i,j,k
+    real(wp) :: xsum
+    call axis_0_equal_mass(nat,at,coord,rot,avmom,evec)
+    call CMAshift(nat,at,coord,shift)
+    do i=1,nat
+       coord(:,i) = coord(:,i) - shift(:)
+    enddo
+    !> do the trafo (chirality is preserved)
+    xsum = calcxsum(evec)
+    if (xsum .lt. 0.0_wp) then
+      do j = 1,3
+        evec(j,1) = -evec(j,1)
+      end do
+    end if
+
+    do i = 1,nat
+      coordtmp(:) = coord(:,i)
+      do j = 1,3
+        xsum = 0.0_wp
+        do k = 1,3
+          xsum = xsum + coordtmp(k) * evec(k,j)
+        end do
+        coord(j,i) = xsum
+      end do
+    end do
+    if(present(rotconst))then
+       rotconst(:) = rot(:)
+    endif
+
+    return
+  end subroutine axis_4_equal_mass
 
 !========================================================================================!
 !> subroutine axistrf
